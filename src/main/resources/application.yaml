@@ -1,0 +1,55 @@
+spring:
+  application:
+    name: user
+  datasource:
+    driver-class-name: org.postgresql.Driver
+    url: ${SPRING_DATASOURCE_URL} #jdbc:postgresql://localhost:5432/userdb
+    username: ${SPRING_DATASOURCE_USERNAME}
+    password: ${SPRING_DATASOURCE_PASSWORD}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: update
+  kafka:
+    bootstrap-servers: kafka:29092
+#    properties:
+#      security:
+#        protocol: SASL_PLAINTEXT
+#      sasl:
+#        mechanism: PLAIN
+#        jaas:
+#          config: org.apache.kafka.common.security.plain.PlainLoginModule required username='kafka-user' password='password1!';
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      properties:
+        spring.json.trusted.packages: ge.croco.user
+        spring.json.user.type.headers: false
+
+  security:
+    user:
+      name: admin
+      password: admin123
+  cache:
+    type: hazelcast
+
+
+logging:
+  level:
+    org:
+      apache:
+        kafka: OFF
+
+jwt:
+  expiration-ms: 1800000 #30 minute
+
+hazelcast:
+  cluster:
+    name: dev
+  network:
+    port: 5701
+    join:
+      tcp-ip:
+        enabled: true
+        members:
+          - 127.0.0.1
