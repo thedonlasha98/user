@@ -130,7 +130,7 @@ public class UserServiceImpl implements UserService {
 
     private void checkUpdateUsername(String oldUsername, String newUsername  ) {
         if (!oldUsername.equals(newUsername)) {
-            if (!userRepository.existsByUsername(newUsername)) {
+            if (userRepository.existsByUsername(newUsername)) {
                 throw new UserAlreadyExistsException(newUsername);
             }
         }
@@ -138,7 +138,7 @@ public class UserServiceImpl implements UserService {
 
     private void checkUpdateEmail(String oldEmail, String newEmail  ) {
         if (!oldEmail.equals(newEmail)) {
-            if (!userRepository.existsByUsername(newEmail)) {
+            if (userRepository.existsByUsername(newEmail)) {
                 throw new UserAlreadyExistsException(newEmail);
             }
         }

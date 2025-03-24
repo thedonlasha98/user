@@ -1,69 +1,78 @@
 package ge.croco.user;
 
+import ge.croco.user.domain.User;
 import ge.croco.user.enums.Role;
-import ge.croco.user.model.UserDetails;
+import ge.croco.user.exception.UserAlreadyExistsException;
+import ge.croco.user.model.UpdateMeRequest;
 import ge.croco.user.model.UserRequest;
-import ge.croco.user.service.UserService;
+import ge.croco.user.repository.UserRepository;
+import ge.croco.user.service.UserServiceImpl;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
-import org.testcontainers.containers.GenericContainer;
-import org.testcontainers.containers.KafkaContainer;
-import org.testcontainers.containers.PostgreSQLContainer;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.utility.DockerImageName;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.security.crypto.password.PasswordEncoder;
 
+import java.util.Optional;
 import java.util.Set;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.when;
 
-@SpringBootTest
-@Testcontainers
+@ExtendWith(MockitoExtension.class)
 public class UserServiceTest {
 
-    @Container
-    private static final PostgreSQLContainer<?> postgresContainer = new PostgreSQLContainer<>("postgres:16")
-            .withDatabaseName("testdb")
-            .withUsername("testuser")
-            .withPassword("testpassword");
+    @InjectMocks
+    private UserServiceImpl userService;
 
-    @Container
-    private static final KafkaContainer kafkaContainer = new KafkaContainer(DockerImageName.parse("confluentinc/cp-kafka:latest"));
+    @Mock
+    private UserRepository userRepository;
 
-    @Container
-    private static final GenericContainer<?> hazelcastContainer = new GenericContainer<>(DockerImageName.parse("hazelcast/hazelcast:5.3.5"))
-            .withExposedPorts(5701);
+    @Mock
+    private PasswordEncoder passwordEncoder;
 
-    @DynamicPropertySource
-    static void setProperties(DynamicPropertyRegistry registry) {
-        registry.add("spring.datasource.url", postgresContainer::getJdbcUrl);
-        registry.add("spring.datasource.username", postgresContainer::getUsername);
-        registry.add("spring.datasource.password", postgresContainer::getPassword);
-        registry.add("spring.kafka.bootstrap-servers", kafkaContainer::getBootstrapServers);
-        registry.add("hazelcast.network.tcpip.enabled", () -> "true");
-        registry.add("hazelcast.network.tcpip.members", () -> hazelcastContainer.getHost() + ":" + hazelcastContainer.getMappedPort(5701));
-
-    }
-
-    @Autowired
-    private UserService userService;
+    @Mock
+    private KafkaTemplate<String, Object> kafkaTemplate;
 
     @Test
-    void testSaveAndGetUser() {
-        // Test saving and retrieving a user
-        UserDetails result = userService.createUser(
-                new UserRequest(
-                        "lashabolga",
-                        "lasha@gmail.com",
-                        "lasha111",
-                        Set.of(Role.ADMIN)
-                )
+    void createUserWithExistingEmail_ThrowsException() {
+        UserRequest userRequest = new UserRequest(
+                "lashabolga",
+                "lasha@gmail.com",
+                "lasha111",
+                Set.of(Role.ADMIN)
+        );
+        //Mock existsByEmail
+        when(userRepository.existsByEmail(userRequest.email())).thenReturn(true);
+
+        assertThatThrownBy(() -> userService.createUser(userRequest))
+                .isInstanceOf(UserAlreadyExistsException.class)
+                .hasMessage("User " + userRequest.email() + " already exists");
+    }
+
+    @Test
+    void updateMeWithExistingUsername_ThrowsException() {
+        Long userId = 1L;
+        UpdateMeRequest updateMeRequest = new UpdateMeRequest(
+                "lashabolga",
+                "lasha@gmail.com",
+                "lasha111"
         );
 
-        // Assert the result
-        assertEquals("lashabolga", result.getUsername());
+        when(userRepository.findById(userId)).thenReturn(
+                Optional.of(User.builder()
+                        .id(userId)
+                        .username("lashabolga1")
+                        .email("lasha@gmail.com")
+                        .build())
+        );
+
+        when(userRepository.existsByUsername(updateMeRequest.username())).thenReturn(true);
+
+        assertThatThrownBy(() -> userService.updateMe(1L, updateMeRequest))
+                .isInstanceOf(UserAlreadyExistsException.class)
+                .hasMessage("User " + updateMeRequest.username() + " already exists");
     }
 }

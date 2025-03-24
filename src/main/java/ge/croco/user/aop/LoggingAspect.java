@@ -1,14 +1,18 @@
 package ge.croco.user.aop;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.fasterxml.jackson.datatype.jsr310.deser.LocalDateDeserializer;
 import com.fasterxml.jackson.datatype.jsr310.deser.LocalDateTimeDeserializer;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.kafka.common.protocol.types.Field;
 import org.aspectj.lang.JoinPoint;
-import org.aspectj.lang.annotation.*;
+import org.aspectj.lang.annotation.AfterReturning;
+import org.aspectj.lang.annotation.Aspect;
+import org.aspectj.lang.annotation.Before;
+import org.aspectj.lang.annotation.Pointcut;
 import org.aspectj.lang.reflect.MethodSignature;
 import org.springframework.stereotype.Component;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -44,32 +48,48 @@ public class LoggingAspect {
 
     @Before("controller()")
     protected void beforeLogger(JoinPoint joinPoint) {
-        HttpServletRequest request = getRequest();
+        getRequest().ifPresent(request -> {
+            String logInfo = new StringBuilder("##### Received Http Request")
+                    .append(" ##### Method: ")
+                    .append(request.getMethod())
+                    .append(" ##### URL: ")
+                    .append(request.getRequestURL())
+                    .append(" ##### Headers: ")
+                    .append(getHeaders(request))
+                    .append(" ##### Body: ")
+                    .append(getRequestBody(joinPoint))
+                    .toString();
 
-        String logInfo = new StringBuilder("##### Received Http Request")
-                .append(" ##### Method: ")
-                .append(request.getMethod())
-                .append(" ##### URL: ")
-                .append(request.getRequestURL())
-                .append(" ##### Headers: ")
-                .append(getHeaders(request))
-                .append(" ##### Body: ")
-                .append(getRequestBody(joinPoint))
-                .toString();
-
-        log.info(logInfo);
+            log.info(logInfo);
+        });
     }
 
     @AfterReturning(value = "controller()", returning = "retVal")
     protected void afterLogger(Object retVal) {
+        getResponse().ifPresent(response -> {
+            StringBuilder logInfo = new StringBuilder("##### Dispatched Http Response:")
+                    .append(" ##### Status Code: ")
+                    .append(response.getStatus());
 
+            if (retVal != null) {
+                logInfo.append(" ##### Response Body: ")
+                        .append(maskSensitiveFields(tryConvertToJson(retVal)));
+            }
+
+            log.info(logInfo.toString());
+        });
     }
 
-    private HttpServletRequest getRequest() {
+    private Optional<HttpServletRequest> getRequest() {
         ServletRequestAttributes attributes = (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
         return Optional.ofNullable(attributes)
-                .map(ServletRequestAttributes::getRequest)
-                .orElse(null);
+                .map(ServletRequestAttributes::getRequest);
+    }
+
+    private Optional<HttpServletResponse> getResponse() {
+        ServletRequestAttributes attributes = (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
+        return Optional.ofNullable(attributes)
+                .map(ServletRequestAttributes::getResponse);
     }
 
     private String getRequestBody(JoinPoint joinPoint) {
@@ -117,5 +137,12 @@ public class LoggingAspect {
         return json;
     }
 
+    private static String tryConvertToJson(Object object) {
+        try {
+            return OBJECT_MAPPER.writeValueAsString(object);
+        } catch (JsonProcessingException e) {
+            return null;
+        }
+    }
 
 }

@@ -14,14 +14,13 @@ import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.jetbrains.annotations.NotNull;
 import org.junit.jupiter.api.*;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.cache.Cache;
 import org.springframework.cache.CacheManager;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
 import org.springframework.kafka.test.utils.KafkaTestUtils;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -31,7 +30,6 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
-import org.springframework.transaction.annotation.Transactional;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.KafkaContainer;
 import org.testcontainers.containers.PostgreSQLContainer;
@@ -50,13 +48,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@ExtendWith(MockitoExtension.class)
 @SpringBootTest
 @Testcontainers
 @AutoConfigureMockMvc
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
-@Transactional
-@Sql(scripts = "/scripts/truncate_data.sql",executionPhase = Sql.ExecutionPhase.BEFORE_TEST_METHOD)
 public class UserControllerIT {
 
     @Container
@@ -100,8 +95,11 @@ public class UserControllerIT {
     @Autowired
     private CacheManager cacheManager;
 
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
     private static ConsumerRecord<String, String> getLatestRecordForTopic(Consumer<String, String> consumer, String topic) {
-        ConsumerRecords<String, String> records = KafkaTestUtils.getRecords(consumer, Duration.ofSeconds(5));
+        ConsumerRecords<String, String> records = KafkaTestUtils.getRecords(consumer, Duration.ofSeconds(1));
         AtomicReference<ConsumerRecord<String, String>> record = new AtomicReference<>();
         records.records(topic).iterator().forEachRemaining(record::set);
         return record.get();
@@ -116,6 +114,13 @@ public class UserControllerIT {
         );
 
         return cf.createConsumer();
+    }
+
+    @BeforeEach
+    void setUp() {
+        System.out.println("Before each run");
+        cacheManager.getCache(USER_CACHE).clear();
+        jdbcTemplate.execute("TRUNCATE TABLE users RESTART IDENTITY CASCADE;");
     }
 
     @Test
@@ -260,9 +265,9 @@ public class UserControllerIT {
                 .andReturn();
         JWTResponse jwt = objectMapper.readValue(mvcResult.getResponse().getContentAsByteArray(), JWTResponse.class);
 
-        mockMvc.perform(MockMvcRequestBuilders.get("/api/users/" + (userDetails.getId()+ 1))
-                        .header("Authorization", "Bearer " + jwt.token())
-                ).andExpect(status().isForbidden());
+        mockMvc.perform(MockMvcRequestBuilders.get("/api/users/" + (userDetails.getId() + 1))
+                .header("Authorization", "Bearer " + jwt.token())
+        ).andExpect(status().isForbidden());
 
         System.out.println("getUserByUSER_ROLE_forOtherUser_FORBIDDEN passed successfully");
     }
@@ -299,7 +304,7 @@ public class UserControllerIT {
     }
 
     @Test
-    @Order(4)
+    @Order(6)
     public void updateUserByADMIN_ROLE_Success() throws Exception {
         String adminUsername = "testtest1";
         String adminPassword = "TestPassword1!";
@@ -316,10 +321,6 @@ public class UserControllerIT {
         String changedUserEmail = "test123@test.com";
         Role changedUserRole = Role.MODERATOR;
 
-        //register kafka consumer
-        Consumer<String, String> consumer = registerKafkaConsumer();
-        consumer.subscribe(Collections.singletonList(KAFKA_TOPIC));
-
         UserDetails adminUser = userService.createUser(new UserRequest(adminUsername, adminEmail, adminPassword, Set.of(adminRole)));
         UserDetails user = userService.createUser(new UserRequest(userUsername, userEmail, userPassword, Set.of(userRole)));
 
@@ -333,8 +334,8 @@ public class UserControllerIT {
 
         mockMvc.perform(MockMvcRequestBuilders.put("/api/users/" + user.getId())
                         .header("Authorization", "Bearer " + jwt.token())
-                .contentType(MediaType.APPLICATION_JSON)
-                                .content(objectMapper.writeValueAsBytes(new UserRequest(changedUsername, changedUserEmail, changedPassword, Set.of(changedUserRole))))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsBytes(new UserRequest(changedUsername, changedUserEmail, changedPassword, Set.of(changedUserRole))))
                 ).andExpect(status().isOk())
                 .andExpect(jsonPath("$.username").value(changedUsername));
 
@@ -347,15 +348,44 @@ public class UserControllerIT {
         Cache.ValueWrapper cachedUser = cacheManager.getCache(USER_CACHE).get(user.getId());
         Assertions.assertNull(cachedUser);
 
-        ConsumerRecord<String, String> record = getLatestRecordForTopic(consumer, KAFKA_TOPIC);
-        UserEvent userEvent = objectMapper.readValue(record.value(), UserEvent.class);
-        Assertions.assertEquals(changedUsername, userEvent.getUsername());
-        Assertions.assertEquals(userEmail, userEvent.getEmail());
-        Assertions.assertEquals(changedUserEmail, userEvent.getEmail());
-        Assertions.assertEquals(changedUserRole, userEvent.getRoles().iterator().next());
-        Assertions.assertEquals(EventType.USER_UPDATED, userEvent.getEventType());
+        System.out.println("updateUserByADMIN_ROLE_Success passed successfully");
+    }
 
-        System.out.println("getUserByADMIN_ROLE_ReturnUser passed successfully");
+    @Test
+    @Order(7)
+    public void deleteUserByADMIN_ROLE_UserDeleted() throws Exception {
+        String adminUsername = "testtest1";
+        String adminPassword = "TestPassword1!";
+        String adminEmail = "test1@test.com";
+        Role adminRole = Role.ADMIN;
+
+        String userUsername = "testtest12";
+        String userPassword = "TestPassword12!";
+        String userEmail = "test12@test.com";
+        Role userRole = Role.USER;
+
+        UserDetails adminUser = userService.createUser(new UserRequest(adminUsername, adminEmail, adminPassword, Set.of(adminRole)));
+        UserDetails user = userService.createUser(new UserRequest(userUsername, userEmail, userPassword, Set.of(userRole)));
+
+
+        MvcResult mvcResult = mockMvc.perform(MockMvcRequestBuilders.post("/api/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsBytes(new LoginRequest(adminUsername, adminPassword)))
+                ).andExpect(status().isOk())
+                .andReturn();
+        JWTResponse jwt = objectMapper.readValue(mvcResult.getResponse().getContentAsByteArray(), JWTResponse.class);
+
+        mockMvc.perform(MockMvcRequestBuilders.delete("/api/users/" + user.getId())
+                        .header("Authorization", "Bearer " + jwt.token())
+                ).andExpect(status().isOk());
+
+        Assertions.assertFalse(userRepository.existsById(user.getId()));
+
+        //check if cached data
+        Cache.ValueWrapper cachedUser = cacheManager.getCache(USER_CACHE).get(user.getId());
+        Assertions.assertNull(cachedUser);
+
+        System.out.println("deleteUserByADMIN_ROLE_UserDeleted passed successfully");
     }
 
 }

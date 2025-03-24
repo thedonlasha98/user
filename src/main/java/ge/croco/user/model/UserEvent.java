@@ -10,6 +10,7 @@ import java.time.Instant;
 @EqualsAndHashCode(callSuper = true)
 @NoArgsConstructor
 @AllArgsConstructor
+@ToString(callSuper = true)
 public class UserEvent extends UserDetails {
     private EventType eventType;
     private Instant timestamp;
