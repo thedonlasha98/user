@@ -48,6 +48,7 @@ public class SecurityConfig {
                         .requestMatchers("/api/login").permitAll() // Public endpoint
                         .requestMatchers("/api/users").permitAll()
                         .requestMatchers(getSwaggerPaths()).permitAll()
+                        .requestMatchers("/actuator/**").permitAll()
                         .requestMatchers("/api/users/me").authenticated() // Need Authentication
                         .requestMatchers("/api/admin/**").hasRole("ADMIN") // Only ADMIN role can access
                         .anyRequest().authenticated()

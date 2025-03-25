@@ -25,7 +25,6 @@ import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
 import org.springframework.kafka.test.utils.KafkaTestUtils;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
-import org.springframework.test.context.jdbc.Sql;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.ResultActions;
@@ -159,6 +158,8 @@ public class UserControllerIT {
         assertThat(userEvent.getRoles()).isEqualTo(Set.of(adminRole));
         assertThat(userEvent.getEventType()).isEqualTo(EventType.USER_CREATED);
 
+        consumer.close();
+
         System.out.println("createUser_with_ADMIN_Role_UserCreated_SendToKafka passed successfully");
     }
 
@@ -242,7 +243,7 @@ public class UserControllerIT {
                 .andExpect(jsonPath("$.id").value(userDetails.getId()));
 
         //check if cached data
-        UserDetails cachedUser = (UserDetails) cacheManager.getCache(USER_CACHE).get(userDetails.getId()).get();
+        UserDetails cachedUser = cacheManager.getCache(USER_CACHE).get(userDetails.getId(),UserDetails.class);
         Assertions.assertEquals(userDetails, cachedUser);
 
         System.out.println("getUserByADMIN_ROLE_ReturnUser passed successfully");
@@ -273,7 +274,7 @@ public class UserControllerIT {
     }
 
     @Test
-    @Order(5)
+    @Order(6)
     public void getUserByUSER_ROLE_WITH_OWN_ID_returnUser() throws Exception {
         String username = "testtest1";
         String password = "TestPassword1!";
@@ -297,14 +298,14 @@ public class UserControllerIT {
                 .andExpect(jsonPath("$.id").value(userDetails.getId()));
 
         //check if cached data
-        UserDetails cachedUser = (UserDetails) cacheManager.getCache(USER_CACHE).get(userDetails.getId()).get();
+        UserDetails cachedUser = cacheManager.getCache(USER_CACHE).get(userDetails.getId(),UserDetails.class);
         Assertions.assertEquals(userDetails, cachedUser);
 
         System.out.println("getUserByUSER_ROLE_WITH_OWN_ID_returnUser passed successfully");
     }
 
     @Test
-    @Order(6)
+    @Order(7)
     public void updateUserByADMIN_ROLE_Success() throws Exception {
         String adminUsername = "testtest1";
         String adminPassword = "TestPassword1!";
@@ -320,6 +321,10 @@ public class UserControllerIT {
         String changedPassword = "TestPassword123!";
         String changedUserEmail = "test123@test.com";
         Role changedUserRole = Role.MODERATOR;
+
+        //register kafka consumer
+        Consumer<String, String> consumer = registerKafkaConsumer();
+        consumer.subscribe(Collections.singletonList(KAFKA_TOPIC));
 
         UserDetails adminUser = userService.createUser(new UserRequest(adminUsername, adminEmail, adminPassword, Set.of(adminRole)));
         UserDetails user = userService.createUser(new UserRequest(userUsername, userEmail, userPassword, Set.of(userRole)));
@@ -348,11 +353,19 @@ public class UserControllerIT {
         Cache.ValueWrapper cachedUser = cacheManager.getCache(USER_CACHE).get(user.getId());
         Assertions.assertNull(cachedUser);
 
+        ConsumerRecord<String, String> record = getLatestRecordForTopic(consumer, KAFKA_TOPIC);
+        UserEvent userEvent = objectMapper.readValue(record.value(), UserEvent.class);
+        Assertions.assertEquals(changedUsername, userEvent.getUsername());
+        Assertions.assertEquals(changedUserEmail, userEvent.getEmail());
+        Assertions.assertEquals(changedUserRole, userEvent.getRoles().iterator().next());
+        Assertions.assertEquals(EventType.USER_UPDATED, userEvent.getEventType());
+
+        consumer.close();
         System.out.println("updateUserByADMIN_ROLE_Success passed successfully");
     }
 
     @Test
-    @Order(7)
+    @Order(8)
     public void deleteUserByADMIN_ROLE_UserDeleted() throws Exception {
         String adminUsername = "testtest1";
         String adminPassword = "TestPassword1!";
@@ -376,8 +389,8 @@ public class UserControllerIT {
         JWTResponse jwt = objectMapper.readValue(mvcResult.getResponse().getContentAsByteArray(), JWTResponse.class);
 
         mockMvc.perform(MockMvcRequestBuilders.delete("/api/users/" + user.getId())
-                        .header("Authorization", "Bearer " + jwt.token())
-                ).andExpect(status().isOk());
+                .header("Authorization", "Bearer " + jwt.token())
+        ).andExpect(status().isOk());
 
         Assertions.assertFalse(userRepository.existsById(user.getId()));
 
