@@ -30,10 +30,10 @@ import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
 import org.testcontainers.containers.GenericContainer;
-import org.testcontainers.containers.KafkaContainer;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.kafka.ConfluentKafkaContainer;
 import org.testcontainers.utility.DockerImageName;
 
 import java.time.Duration;
@@ -60,7 +60,7 @@ public class UserControllerIT {
             .withPassword("testpassword");
 
     @Container
-    private static final KafkaContainer kafkaContainer = new KafkaContainer(DockerImageName.parse("confluentinc/cp-kafka:latest"));
+    private static final ConfluentKafkaContainer kafkaContainer = new ConfluentKafkaContainer(DockerImageName.parse("confluentinc/cp-kafka:latest"));
 
     @Container
     private static final GenericContainer<?> hazelcastContainer = new GenericContainer<>(DockerImageName.parse("hazelcast/hazelcast:5.3.5"))
@@ -243,7 +243,7 @@ public class UserControllerIT {
                 .andExpect(jsonPath("$.id").value(userDetails.getId()));
 
         //check if cached data
-        UserDetails cachedUser = cacheManager.getCache(USER_CACHE).get(userDetails.getId(),UserDetails.class);
+        UserDetails cachedUser = cacheManager.getCache(USER_CACHE).get(userDetails.getId(), UserDetails.class);
         Assertions.assertEquals(userDetails, cachedUser);
 
         System.out.println("getUserByADMIN_ROLE_ReturnUser passed successfully");
@@ -298,7 +298,7 @@ public class UserControllerIT {
                 .andExpect(jsonPath("$.id").value(userDetails.getId()));
 
         //check if cached data
-        UserDetails cachedUser = cacheManager.getCache(USER_CACHE).get(userDetails.getId(),UserDetails.class);
+        UserDetails cachedUser = cacheManager.getCache(USER_CACHE).get(userDetails.getId(), UserDetails.class);
         Assertions.assertEquals(userDetails, cachedUser);
 
         System.out.println("getUserByUSER_ROLE_WITH_OWN_ID_returnUser passed successfully");
